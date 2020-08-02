@@ -316,7 +316,7 @@ class MishaLook():
     self.w_image_size = widgets.BoundedIntText(
         value=self.cfg.aligned_image_size,
         min = 512,
-        max = 2560,
+        max = 6144,
         step=1,
         description='Result image size:',
         disabled=False,
