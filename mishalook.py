@@ -79,6 +79,8 @@ class MishaLook():
       kp_predictor_image_height = 512,
       aligned_image_size = 1024,
       height_ratio = 0.9,
+      vertical_shift = 0,
+      horizontal_shift = 0,
       replace_background = True,
       change_aspect = False,
       target_aspect=0.75,
@@ -89,6 +91,10 @@ class MishaLook():
       blur=0,
       n_images_limit=1000,
       jpeg_quality=99,
+      preview_grid_range=[0,0],
+      make_grid = True,
+      grid_width_max=1500,
+      grid_width_item=180,
     )
 
     if not torch_is_valid:
@@ -139,7 +145,7 @@ class MishaLook():
     blended = cv2.convertScaleAbs(img1*(1-alpha) + img2*alpha)
     return blended
 
-  def align_images(self, images, keypoints, boxes, aligned_image_size, align_pad=0, height_ratio=1, target_aspect=None):
+  def align_images(self, images, keypoints, boxes, aligned_image_size, align_pad=0, height_ratio=1, vertical_shift=0, horizontal_shift=0, target_aspect=None):
     def rotate(point, origin, angle):
       ox, oy = origin
       px, py = point[:, 0], point[:, 1]
@@ -165,6 +171,9 @@ class MishaLook():
       height = box_height * height_ratio
 
       mid = (box[:2] + box[2:4]) * 0.5
+
+      shift = np.array([horizontal_shift * image.shape[1], vertical_shift * image.shape[0]])
+      mid += shift
 
       left_top = mid - height //2
       left_top[0] = mid[0] - (height*aspect) //2
@@ -215,6 +224,28 @@ class MishaLook():
     )
     display(self.w_height_ratio)
 
+    self.w_vertical_shift = widgets.BoundedFloatText(
+        value=self.cfg.vertical_shift,
+        description='Vertical shift:',
+        disabled=False,
+        min = -0.3,
+        max = 0.3,
+        step=0.001,
+        style = {'description_width': 'initial'}
+    )
+    display(self.w_vertical_shift)
+
+    self.w_horizontal_shift = widgets.BoundedFloatText(
+        value=self.cfg.horizontal_shift,
+        description='Horizontal shift:',
+        disabled=False,
+        min = -0.3,
+        max = 0.3,
+        step=0.001,
+        style = {'description_width': 'initial'}
+    )
+    display(self.w_horizontal_shift)
+
     self.w_replace_background = widgets.Checkbox(
         value=self.cfg.replace_background,
         description='Replace background',
@@ -223,6 +254,15 @@ class MishaLook():
         style = {'description_width': 'initial'}
     )
     display(self.w_replace_background)
+
+    self.w_colorpicker = widgets.ColorPicker(
+        concise=False,
+        description='Background color:',
+        value=self.cfg.background_color,
+        disabled=False,
+        style = {'description_width': 'initial'}
+    )
+    display(self.w_colorpicker)
 
     self.w_change_aspect = widgets.Checkbox(
         value=self.cfg.change_aspect,
@@ -243,15 +283,6 @@ class MishaLook():
         style = {'description_width': 'initial'}
     )
     display(self.w_target_aspect)
-
-    self.w_colorpicker = widgets.ColorPicker(
-        concise=False,
-        description='Background color:',
-        value=self.cfg.background_color,
-        disabled=False,
-        style = {'description_width': 'initial'}
-    )
-    display(self.w_colorpicker)
 
     self.w_dilation = widgets.BoundedIntText(
         value=self.cfg.dilate,
@@ -289,13 +320,36 @@ class MishaLook():
     self.w_preview_image_index = widgets.BoundedIntText(
         value=self.cfg.preview_image_index,
         min = 0,
-        max = len(self.image_paths),
+        max = len(self.image_paths)-1,
         step=1,
-        description=f'Preview Image Index (0..{len(self.image_paths)-1}):',
+        description=f'Preview image index (0..{len(self.image_paths)-1}):',
         disabled=False,
         style = {'description_width': 'initial'}
     )
     display(self.w_preview_image_index)
+
+    self.w_make_grid = widgets.Checkbox(
+        value=self.cfg.make_grid,
+        description='Make preview grid',
+        disabled=False,
+        indent=False,
+        style = {'description_width': 'initial'}
+    )
+    display(self.w_make_grid)
+
+    self.w_preview_grid_range = widgets.IntRangeSlider(
+        value=[0, 0],
+        min=0,
+        max=len(self.image_paths),
+        step=1,
+        description='Grid range:',
+        disabled=False,
+        continuous_update=False,
+        orientation='horizontal',
+        readout=True,
+        style = {'description_width': 'initial'}
+    )
+    display(self.w_preview_grid_range)
 
     self.btn_process_single = widgets.Button(
         description='Preview',
@@ -360,9 +414,14 @@ class MishaLook():
 
   def update_cfg(self):
     self.cfg.height_ratio = self.w_height_ratio.value
+    self.cfg.vertical_shift = self.w_vertical_shift.value
+    self.cfg.horizontal_shift = self.w_horizontal_shift.value
+    self.cfg.height_ratio = self.w_height_ratio.value
     self.cfg.replace_background = self.w_replace_background.value
+    self.cfg.make_grid = self.w_make_grid.value
     self.cfg.background_color = self.w_colorpicker.value
     self.cfg.preview_image_index = self.w_preview_image_index.value
+    self.cfg.preview_grid_range = self.w_preview_grid_range.value
     self.cfg.erode = self.w_erosion.value
     self.cfg.dilate = self.w_dilation.value
     self.cfg.blur = self.w_blur.value
@@ -371,11 +430,70 @@ class MishaLook():
 
   def process_preview(self, *args):
     self.update_cfg()
-    clear_output()
-    self.configure()
     image_path = self.image_paths[self.cfg.preview_image_index]
     self.configured = True
-    self.process_single(image_path)
+
+    grid_img = None
+    preview_single_img = None
+
+    print("\nProcessing...")
+
+    preview_single_img = self.process_single(image_path)
+    print(f"Preview image: {os.path.basename(image_path)}")
+
+    if self.cfg.preview_grid_range[1] > 0 and self.cfg.make_grid:
+      grid = []
+      pos = {}
+      cell_size = None
+      for i in range(len(self.image_paths)):
+        if i < self.cfg.preview_grid_range[0] or i >= self.cfg.preview_grid_range[1]:
+          continue
+        img = self.process_single(self.image_paths[i], is_preview=True, aligned_only=True)
+        grid.append(img)
+        if i == 0:
+          aspect = img.shape[1] / img.shape[0]
+          cell_size = (self.cfg.grid_width_item, int(self.cfg.grid_width_item/aspect))
+        print(f"Grid {i+1}: {os.path.basename(self.image_paths[i])}")
+      for i, img in enumerate(grid):
+        grid[i] = cv2.resize(img, cell_size)
+      n_cols_max = self.cfg.grid_width_max // self.cfg.grid_width_item
+      x_max = 0
+      y_max = 0
+      for i, img in enumerate(grid):
+        row = i // n_cols_max
+        col = i % n_cols_max
+        x = col * img.shape[1]
+        y = row * img.shape[0]
+        pos[i] = (x,y)
+        x_max = max(x_max, x)
+        y_max = max(y_max, y)
+      v_lines = set()
+      h_lines = set()
+      if x_max>0:
+        grid_w = x_max+cell_size[0]
+        grid_h = y_max+cell_size[1]
+        grid_img = np.ones((grid_h, grid_w, grid[0].shape[2]), grid[0].dtype) * 255
+        for i, img in enumerate(grid):
+          p = pos[i]
+          v_lines.add(p[0])
+          h_lines.add(p[1])
+          grid_img[p[1]:p[1]+cell_size[1], p[0]:p[0]+cell_size[0]] = img
+        v_lines.add(grid_w-1)
+        h_lines.add(grid_h-1)
+        for x in v_lines: 
+          cv2.line(grid_img, (x,0), (x, grid_h-1), (150, 150, 150), thickness=1)
+        for y in h_lines: 
+          cv2.line(grid_img, (0,y), (grid_w-1, y), (150, 150, 150), thickness=1)
+
+    clear_output()
+    self.configure()
+
+    if preview_single_img is not None:
+        display(Image.fromarray(preview_single_img[...,::-1]))
+        print()
+    if grid_img is not None:
+        display(Image.fromarray(grid_img[...,::-1]))
+
 
   def process_all(self, *args):
     self.cfg.aligned_image_size = self.w_image_size.value
@@ -395,7 +513,7 @@ class MishaLook():
 
     print("Done")
 
-  def process_single(self, image_path, is_preview=True):
+  def process_single(self, image_path, is_preview=True, aligned_only=False):
     interm = SimpleNamespace(**{
       'images': {},
       'base_names': {},
@@ -439,7 +557,9 @@ class MishaLook():
       interm.boxes,
       self.cfg.kp_predictor_image_height,
       height_ratio = 1/self.cfg.height_ratio,
-      target_aspect = self.cfg.target_aspect
+      target_aspect = self.cfg.target_aspect,
+      vertical_shift=self.cfg.vertical_shift,
+      horizontal_shift=self.cfg.horizontal_shift
     )
 
     for im_name, im_masks in self.get_masks(interm.aligned_images).items():
@@ -504,10 +624,13 @@ class MishaLook():
           bg = np.ones_like(preview) * np.array(bg_color)
           img_aligned = self.alpha_blend(bg, image, mask)
 
-        preview = np.hstack([interm.resized_images[im_name], preview, img_aligned])
-        pil_image = Image.fromarray(preview[...,::-1])
-
-        display(pil_image)
+        if not aligned_only:
+          preview = np.hstack([interm.resized_images[im_name], preview, img_aligned])
+          return preview
+          # pil_image = Image.fromarray(preview[...,::-1])
+          # display(pil_image)
+        else:
+          return img_aligned
 
     if not is_preview:
       out_scale = 1
@@ -522,7 +645,9 @@ class MishaLook():
         interm.boxes,
         self.cfg.aligned_image_size,
         height_ratio = 1/self.cfg.height_ratio,
-        target_aspect = self.cfg.target_aspect
+        target_aspect = self.cfg.target_aspect,
+        vertical_shift=self.cfg.vertical_shift,
+        horizontal_shift=self.cfg.horizontal_shift
       )
 
       for im_name, out_image in interm.out_images.items():
