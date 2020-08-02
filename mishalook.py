@@ -449,10 +449,11 @@ class MishaLook():
         if i < self.cfg.preview_grid_range[0] or i >= self.cfg.preview_grid_range[1]:
           continue
         img = self.process_single(self.image_paths[i], is_preview=True, aligned_only=True)
-        grid.append(img)
-        if i == 0:
-          aspect = img.shape[1] / img.shape[0]
-          cell_size = (self.cfg.grid_width_item, int(self.cfg.grid_width_item/aspect))
+        if img if not None:
+          grid.append(img)
+          if cell_size is None:
+            aspect = img.shape[1] / img.shape[0]
+            cell_size = (self.cfg.grid_width_item, int(self.cfg.grid_width_item/aspect))
         print(f"Grid {i+1}: {os.path.basename(self.image_paths[i])}")
       for i, img in enumerate(grid):
         grid[i] = cv2.resize(img, cell_size)
@@ -547,7 +548,7 @@ class MishaLook():
       all_boxes = im_keypoints.get_fields()['pred_boxes']
       if len(all_keypoints) < 1:
         print(f"Cannot process {interm.base_names[im_name]}")
-        return
+        return None
       interm.keypoints[im_name] = all_keypoints[0].numpy()
       interm.boxes[im_name] = all_boxes.tensor[0].numpy()
 
@@ -565,25 +566,28 @@ class MishaLook():
     for im_name, im_masks in self.get_masks(interm.aligned_images).items():
       classes = im_masks.get_fields()['pred_classes'].numpy()
       human_indices = np.where(classes == 0)[0]
-      if len(human_indices) == 1:
-        mask = im_masks.get_fields()['pred_masks'].numpy()[human_indices[0]]
-        mask = mask[..., None] * 1.0
-        mask = np.tile(mask.astype(np.uint8) * 255, (1,1,3))
-        if self.cfg.erode > 0:
-          mask = cv2.erode(
-            mask,
-            np.ones((3, 3), np.uint8),
-            iterations=self.cfg.erode
-          )
-        if self.cfg.dilate > 0:
-          mask = cv2.dilate(
-            mask,
-            np.ones((3, 3), np.uint8),
-            iterations=self.cfg.dilate
-          )
+      # if len(human_indices) == 1:
+      if len(human_indices) < 1:
+        print(f"Cannot process {interm.base_names[im_name]}")
+        return None
+      mask = im_masks.get_fields()['pred_masks'].numpy()[human_indices[0]]
+      mask = mask[..., None] * 1.0
+      mask = np.tile(mask.astype(np.uint8) * 255, (1,1,3))
+      if self.cfg.erode > 0:
+        mask = cv2.erode(
+          mask,
+          np.ones((3, 3), np.uint8),
+          iterations=self.cfg.erode
+        )
+      if self.cfg.dilate > 0:
+        mask = cv2.dilate(
+          mask,
+          np.ones((3, 3), np.uint8),
+          iterations=self.cfg.dilate
+        )
 
-        mask = mask[..., 0] > 128
-        interm.masks[im_name] = mask
+      mask = mask[..., 0] > 128
+      interm.masks[im_name] = mask
 
     for im_name, image in interm.aligned_images.items():
       preview = interm.aligned_images[im_name].copy()
