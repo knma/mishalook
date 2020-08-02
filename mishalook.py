@@ -338,7 +338,7 @@ class MishaLook():
     display(self.w_make_grid)
 
     self.w_preview_grid_range = widgets.IntRangeSlider(
-        value=[0, 0],
+        value=self.cfg.preview_grid_range,
         min=0,
         max=len(self.image_paths),
         step=1,
