@@ -449,7 +449,7 @@ class MishaLook():
         if i < self.cfg.preview_grid_range[0] or i >= self.cfg.preview_grid_range[1]:
           continue
         img = self.process_single(self.image_paths[i], is_preview=True, aligned_only=True)
-        if img if not None:
+        if img is not None:
           grid.append(img)
           if cell_size is None:
             aspect = img.shape[1] / img.shape[0]
