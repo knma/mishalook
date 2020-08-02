@@ -85,6 +85,8 @@ class MishaLook():
       change_aspect = False,
       target_aspect=0.75,
       background_color = '#ffffff',
+      brightness=1,
+      contrast=1,
       preview_image_index=0,
       dilate=5,
       erode=0,
@@ -246,24 +248,6 @@ class MishaLook():
     )
     display(self.w_horizontal_shift)
 
-    self.w_replace_background = widgets.Checkbox(
-        value=self.cfg.replace_background,
-        description='Replace background',
-        disabled=False,
-        indent=False,
-        style = {'description_width': 'initial'}
-    )
-    display(self.w_replace_background)
-
-    self.w_colorpicker = widgets.ColorPicker(
-        concise=False,
-        description='Background color:',
-        value=self.cfg.background_color,
-        disabled=False,
-        style = {'description_width': 'initial'}
-    )
-    display(self.w_colorpicker)
-
     self.w_change_aspect = widgets.Checkbox(
         value=self.cfg.change_aspect,
         description='Change aspect ratio',
@@ -283,6 +267,46 @@ class MishaLook():
         style = {'description_width': 'initial'}
     )
     display(self.w_target_aspect)
+
+    self.w_replace_background = widgets.Checkbox(
+        value=self.cfg.replace_background,
+        description='Replace background',
+        disabled=False,
+        indent=False,
+        style = {'description_width': 'initial'}
+    )
+    display(self.w_replace_background)
+
+    self.w_colorpicker = widgets.ColorPicker(
+        concise=False,
+        description='Background color:',
+        value=self.cfg.background_color,
+        disabled=False,
+        style = {'description_width': 'initial'}
+    )
+    display(self.w_colorpicker)
+
+    self.w_brightness = widgets.BoundedFloatText(
+        value=self.cfg.brightness,
+        description='Brightness:',
+        disabled=False,
+        min = 0.1,
+        max = 2,
+        step=0.01,
+        style = {'description_width': 'initial'}
+    )
+    display(self.w_brightness)
+
+    self.w_contrast = widgets.BoundedFloatText(
+        value=self.cfg.contrast,
+        description='Contrast:',
+        disabled=False,
+        min = 0.1,
+        max = 2,
+        step=0.01,
+        style = {'description_width': 'initial'}
+    )
+    display(self.w_contrast)
 
     self.w_dilation = widgets.BoundedIntText(
         value=self.cfg.dilate,
@@ -427,6 +451,8 @@ class MishaLook():
     self.cfg.blur = self.w_blur.value
     self.cfg.change_aspect = self.w_change_aspect.value
     self.cfg.target_aspect = self.w_target_aspect.value
+    self.cfg.brightness = self.w_brightness.value
+    self.cfg.contrast = self.w_contrast.value
 
   def process_preview(self, *args):
     self.update_cfg()
@@ -513,6 +539,21 @@ class MishaLook():
       self.process_single(image_path, is_preview=False)
 
     print("Done")
+
+  def adjust_brightness(self, image, val):
+    if val != 1:
+      _image = image.astype(np.float16)
+      _image = _image + int((val-1) * 255)
+      image = np.clip(_image, 0, 255).astype(np.uint8)
+    return image
+
+  def adjust_contrast(self, image, val):
+    if val != 1:
+      _image = image.astype(np.float16) - (255/2)
+      _image = _image * val
+      _image = _image  + (255/2)
+      image = np.clip(_image, 0, 255).astype(np.uint8)
+    return image
 
   def process_single(self, image_path, is_preview=True, aligned_only=False):
     interm = SimpleNamespace(**{
@@ -621,12 +662,13 @@ class MishaLook():
         box = interm.aligned_boxes[im_name].reshape((2,2))
         cv2.rectangle(preview, (box[0,0], box[0,1]), (box[1,0], box[1,1]), (255, 0, 0), 1)
 
-        img_aligned = image
+        img_aligned = self.adjust_brightness(image, self.cfg.brightness)
+        img_aligned = self.adjust_contrast(img_aligned, self.cfg.contrast)
         if self.cfg.replace_background:
           bg_color = self.hexToRGB(self.cfg.background_color)
           bg_color[0], bg_color[2] = bg_color[2], bg_color[0]
           bg = np.ones_like(preview) * np.array(bg_color)
-          img_aligned = self.alpha_blend(bg, image, mask)
+          img_aligned = self.alpha_blend(bg, img_aligned, mask)
 
         if not aligned_only:
           preview = np.hstack([interm.resized_images[im_name], preview, img_aligned])
@@ -657,6 +699,9 @@ class MishaLook():
       for im_name, out_image in interm.out_images.items():
         mask = interm.masks[im_name]
         mask = cv2.resize(mask, (out_image.shape[1], out_image.shape[0]))
+
+        out_image = self.adjust_brightness(out_image, self.cfg.brightness)
+        out_image = self.adjust_contrast(out_image, self.cfg.contrast)
 
         base_name = interm.base_names[im_name]
         base_name_noext = os.path.splitext(base_name)[0]
